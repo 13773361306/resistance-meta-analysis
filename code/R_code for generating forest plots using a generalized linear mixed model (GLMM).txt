@@ -1,0 +1,385 @@
+# ============================================================
+# GLMM SUBGROUP META-ANALYSIS TEMPLATE
+# ============================================================
+# This script performs single-proportion meta-analysis using a
+# generalized linear mixed model (GLMM) with a binomial distribution
+# and logit link function.
+#
+# The script automatically detects column names for Events, Total,
+# and Study, making it adaptable to different Excel file structures.
+# ============================================================
+
+library(meta)
+library(readxl)
+library(openxlsx)
+library(dplyr)
+
+file_path <- "D:/Desktop/meta/E.coli.xlsx"
+sheet_names <- excel_sheets(file_path)
+cat("Sheets found:", paste(sheet_names, collapse = ", "), "\n\n")
+
+all_results <- list()
+
+shorten_sheet_name <- function(name, max_length = 31) {
+  if (nchar(name) <= max_length) return(name)
+  paste0(substr(name, 1, 25), "...")
+}
+
+# Safely extract first numeric value from objects that may return length > 1
+first_num <- function(x) {
+  if (is.null(x) || length(x) == 0) return(NA_real_)
+  x <- suppressWarnings(as.numeric(x))
+  x <- x[is.finite(x)]
+  if (length(x) == 0) return(NA_real_)
+  x[1]
+}
+
+first_p <- function(x) {
+  p <- first_num(x)
+  if (is.na(p)) return(NA_character_)
+  format.pval(p, eps = 0.001, digits = 3)
+}
+
+for (sheet_name in sheet_names) {
+
+  cat("Analyzing:", sheet_name, "\n")
+  ecoli <- read_excel(file_path, sheet = sheet_name)
+
+  # Clean column names: trim whitespace
+  names(ecoli) <- trimws(names(ecoli))
+
+  cat("  Actual column names:", paste(names(ecoli), collapse = " | "), "\n")
+
+  # Automatically detect Events / Total / study columns
+  find_col <- function(candidates, nms) {
+    hit <- which(tolower(nms) %in% tolower(candidates))
+    if (length(hit) == 0) return(NA_character_)
+    nms[hit[1]]
+  }
+
+  events_col <- find_col(
+    c("Events", "Event", "Resistant", "Resistance", "R"),
+    names(ecoli)
+  )
+
+  total_col <- find_col(
+    c("Total", "N", "Tested", "Number tested", "Sample size"),
+    names(ecoli)
+  )
+
+  study_col <- find_col(
+    c("study", "Study", "Study ID", "Author", "Reference"),
+    names(ecoli)
+  )
+
+  if (is.na(events_col) || is.na(total_col) || is.na(study_col)) {
+    cat(
+      "WARNING:", sheet_name,
+      "could not identify required columns. Detection: Events=", events_col,
+      "; Total=", total_col,
+      "; study=", study_col,
+      "\n\n"
+    )
+    next
+  }
+
+  # Rename to standard names for subsequent code
+  names(ecoli)[names(ecoli) == events_col] <- "Events"
+  names(ecoli)[names(ecoli) == total_col] <- "Total"
+  names(ecoli)[names(ecoli) == study_col] <- "study"
+
+  ecoli <- ecoli %>%
+    mutate(
+      Events = suppressWarnings(as.numeric(Events)),
+      Total = suppressWarnings(as.numeric(Total))
+    )
+
+  ecoli_clean <- ecoli %>%
+    filter(
+      !is.na(Events),
+      !is.na(Total),
+      Total >= 10,
+      Total > 0,
+      Events >= 0,
+      Events <= Total
+    )
+
+  if (nrow(ecoli_clean) == 0) {
+    cat("WARNING:", sheet_name, "no valid data after cleaning - skipping\n\n")
+    next
+  }
+
+  complete_data <- ecoli %>% filter(!is.na(Events), !is.na(Total))
+  removed_na <- nrow(ecoli) - nrow(complete_data)
+  small_studies <- complete_data %>% filter(Total < 10)
+  removed_small <- nrow(small_studies)
+  invalid_studies <- complete_data %>%
+    filter(Total <= 0 | Events < 0 | Events > Total)
+  removed_invalid <- nrow(invalid_studies)
+  total_removed <- nrow(ecoli) - nrow(ecoli_clean)
+
+  tryCatch({
+
+    meta.glmm <- metaprop(
+      event = Events,
+      n = Total,
+      data = ecoli_clean,
+      studlab = study,
+      sm = "PLOGIT",
+      method = "GLMM",
+      method.tau = "ML",
+      common = FALSE,
+      random = TRUE,
+      overall = TRUE,
+      prediction = TRUE,
+      level.predict = 0.95,
+      backtransf = TRUE,
+      warn = TRUE
+    )
+
+    pooled_prop <- first_num(meta::backtransf(meta.glmm$TE.random, sm = "PLOGIT"))
+    pooled_lower <- first_num(meta::backtransf(meta.glmm$lower.random, sm = "PLOGIT"))
+    pooled_upper <- first_num(meta::backtransf(meta.glmm$upper.random, sm = "PLOGIT"))
+
+    pi_lower <- if (!is.null(meta.glmm$lower.predict) &&
+                    length(meta.glmm$lower.predict) > 0 &&
+                    !all(is.na(meta.glmm$lower.predict))) {
+      first_num(meta::backtransf(meta.glmm$lower.predict, sm = "PLOGIT"))
+    } else NA_real_
+
+    pi_upper <- if (!is.null(meta.glmm$upper.predict) &&
+                    length(meta.glmm$upper.predict) > 0 &&
+                    !all(is.na(meta.glmm$upper.predict))) {
+      first_num(meta::backtransf(meta.glmm$upper.predict, sm = "PLOGIT"))
+    } else NA_real_
+
+    pdf_file <- paste0("D:/Desktop/meta/", sheet_name, "_GLMM_forest.pdf")
+    pdf_height <- max(20, 0.35 * meta.glmm$k + 8)
+
+    pdf(pdf_file, height = pdf_height, width = 14, family = "Times")
+
+    forest(
+      meta.glmm,
+      layout = "Revman",
+      leftcols = c("studlab", "event", "n", "effect.ci"),
+      leftlabs = c("Study", "Resistant", "Total", "Proportion [95% CI]"),
+      rightcols = FALSE,
+      family = "Times",
+      fontsize = 9.5,
+      col.vertical.line = "transparent",
+      col.diamond.random = "#669999",
+      col.diamond.lines.random = "#669999",
+      col.square = "#336699",
+      col.square.lines = "#336699",
+      col.study = "#006666",
+      col.inside = "black",
+      col.label.right = "black",
+      col.random = "#660099",
+      col.predict = "#660099",
+      overall = TRUE,
+      overall.hetstat = TRUE,
+      common = FALSE,
+      random = TRUE,
+      prediction = TRUE,
+      backtransf = TRUE,
+      weight.study = "same",
+      squaresize = 0.8,
+      height = 0.5,
+      plotwidth = "12cm",
+      colgap.forest.left = "1.5cm",
+      colgap.left = "1.5cm",
+      xlab = "",
+      xlim = c(0, 1),
+      smlab = "Proportion",
+      digits = 2,
+      digits.pval = 3,
+      digits.pval.Q = 3,
+      scientific.pval = FALSE,
+      JAMA.pval = TRUE,
+      zero.pval = TRUE
+    )
+
+    dev.off()
+
+    p_het_display <- first_p(meta.glmm$pval.Q)
+
+    results_df <- data.frame(
+      Sheet_Name = sheet_name,
+      Model = "Binomial GLMM (logit link)",
+      Studies_Original = nrow(ecoli),
+      Studies_Analyzed = meta.glmm$k,
+      Studies_Removed_NA = removed_na,
+      Studies_Removed_Small = removed_small,
+      Studies_Removed_Invalid = removed_invalid,
+      Total_Removed = total_removed,
+      Total_Participants = sum(meta.glmm$n),
+      Total_Events = sum(meta.glmm$event),
+      Overall_Proportion = round(pooled_prop, 4),
+      Overall_Percent = round(pooled_prop * 100, 2),
+      CI_95_Lower = round(pooled_lower, 4),
+      CI_95_Upper = round(pooled_upper, 4),
+      CI_95_Lower_Percent = round(pooled_lower * 100, 2),
+      CI_95_Upper_Percent = round(pooled_upper * 100, 2),
+      PI_95_Lower = round(pi_lower, 4),
+      PI_95_Upper = round(pi_upper, 4),
+      PI_95_Lower_Percent = round(pi_lower * 100, 2),
+      PI_95_Upper_Percent = round(pi_upper * 100, 2),
+      Tau2 = round(first_num(meta.glmm$tau2), 4),
+      I2 = round(first_num(meta.glmm$I2) * 100, 2),
+      P_value_heterogeneity = p_het_display,
+      Q_statistic = round(first_num(meta.glmm$Q), 2),
+      df = first_num(meta.glmm$df.Q),
+      Status = "Success",
+      stringsAsFactors = FALSE
+    )
+
+    all_results[[sheet_name]] <- list(
+      summary = results_df,
+      meta_object = meta.glmm,
+      cleaned_data = ecoli_clean
+    )
+
+    cat("  GLMM pooled proportion = ", round(pooled_prop * 100, 2), "%\n", sep = "")
+    cat("  95% CI = ", round(pooled_lower * 100, 2), "% - ",
+        round(pooled_upper * 100, 2), "%\n", sep = "")
+    cat("  95% PI = ", round(pi_lower * 100, 2), "% - ",
+        round(pi_upper * 100, 2), "%\n\n", sep = "")
+
+  }, error = function(e) {
+
+    if (dev.cur() > 1) try(dev.off(), silent = TRUE)
+
+    results_df <- data.frame(
+      Sheet_Name = sheet_name,
+      Model = "Binomial GLMM (logit link)",
+      Studies_Original = nrow(ecoli),
+      Studies_Analyzed = nrow(ecoli_clean),
+      Studies_Removed_NA = removed_na,
+      Studies_Removed_Small = removed_small,
+      Studies_Removed_Invalid = removed_invalid,
+      Total_Removed = total_removed,
+      Total_Participants = sum(ecoli_clean$Total, na.rm = TRUE),
+      Total_Events = sum(ecoli_clean$Events, na.rm = TRUE),
+      Overall_Proportion = NA,
+      Overall_Percent = NA,
+      CI_95_Lower = NA,
+      CI_95_Upper = NA,
+      CI_95_Lower_Percent = NA,
+      CI_95_Upper_Percent = NA,
+      PI_95_Lower = NA,
+      PI_95_Upper = NA,
+      PI_95_Lower_Percent = NA,
+      PI_95_Upper_Percent = NA,
+      Tau2 = NA,
+      I2 = NA,
+      P_value_heterogeneity = NA,
+      Q_statistic = NA,
+      df = NA,
+      Status = paste("Error:", e$message),
+      stringsAsFactors = FALSE
+    )
+
+    all_results[[sheet_name]] <<- list(
+      summary = results_df,
+      meta_object = NULL,
+      cleaned_data = ecoli_clean
+    )
+
+    cat("  GLMM analysis error:", e$message, "\n\n")
+  })
+}
+
+if (length(all_results) == 0) {
+  cat("WARNING: No sheets contained valid data for analysis!\n")
+} else {
+
+  all_summaries <- do.call(rbind, lapply(all_results, function(x) x$summary))
+  results_file <- "D:/Desktop/meta/All_Sheets_Meta_Analysis_GLMM_ML_with_PI.xlsx"
+
+  wb <- createWorkbook()
+  addWorksheet(wb, "Summary_All_Sheets")
+  writeData(wb, "Summary_All_Sheets", all_summaries)
+
+  used_sheet_names <- "Summary_All_Sheets"
+
+  for (sheet_name in names(all_results)) {
+
+    short_name <- shorten_sheet_name(sheet_name)
+
+    if (!is.null(all_results[[sheet_name]]$meta_object)) {
+
+      m <- all_results[[sheet_name]]$meta_object
+
+      study_details <- data.frame(
+        Study = m$studlab,
+        Events = m$event,
+        Total = m$n,
+        Raw_Proportion = round(m$event / m$n, 4),
+        Raw_Percent = round((m$event / m$n) * 100, 2),
+        stringsAsFactors = FALSE
+      )
+
+      details_sheet_name <- substr(paste0("Det_", short_name), 1, 31)
+      if (details_sheet_name %in% used_sheet_names) {
+        details_sheet_name <- substr(paste0(details_sheet_name, "_2"), 1, 31)
+      }
+
+      addWorksheet(wb, details_sheet_name)
+      writeData(wb, details_sheet_name, study_details)
+      used_sheet_names <- c(used_sheet_names, details_sheet_name)
+    }
+
+    cleaned_sheet_name <- substr(paste0("Data_", short_name), 1, 31)
+    if (cleaned_sheet_name %in% used_sheet_names) {
+      cleaned_sheet_name <- substr(paste0(cleaned_sheet_name, "_2"), 1, 31)
+    }
+
+    addWorksheet(wb, cleaned_sheet_name)
+    writeData(wb, cleaned_sheet_name, all_results[[sheet_name]]$cleaned_data)
+    used_sheet_names <- c(used_sheet_names, cleaned_sheet_name)
+  }
+
+  addWorksheet(wb, "Methods_Readme")
+
+  methods_df <- data.frame(
+    Item = c(
+      "Outcome",
+      "Model",
+      "Distribution",
+      "Link function",
+      "Between-study variance estimator",
+      "Random-effects model",
+      "Prediction interval",
+      "Prediction interval level",
+      "Minimum Total filter",
+      "P-value display",
+      "R version",
+      "meta package version",
+      "metafor package version"
+    ),
+    Setting = c(
+      "Single proportion",
+      "Generalized linear mixed model (GLMM)",
+      "Binomial",
+      "Logit",
+      "Maximum likelihood (ML)",
+      "Random effects",
+      "Yes",
+      "95%",
+      "Total >= 10",
+      "P < 0.001 for values below 0.001; otherwise 3 decimals",
+      R.version.string,
+      as.character(packageVersion("meta")),
+      as.character(packageVersion("metafor"))
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  writeData(wb, "Methods_Readme", methods_df)
+  saveWorkbook(wb, results_file, overwrite = TRUE)
+
+  cat("\n=== GLMM analysis complete ===\n")
+  cat("Summary results saved to:", results_file, "\n")
+  cat("Sheets analyzed successfully:", sum(all_summaries$Status == "Success"), "\n")
+  cat("Sheets with errors:", sum(all_summaries$Status != "Success"), "\n")
+}

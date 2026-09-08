@@ -1,0 +1,421 @@
+# ============================================================
+# SUBGROUP META-ANALYSIS TEMPLATE
+# ============================================================
+# This script performs subgroup meta-analysis using the Freeman-Tukey
+# double arcsine transformation (PFT) with a random-effects model.
+#
+# The subgroup variable "AST Guideline" can be replaced with any other
+# categorical variable (e.g., Year, Region, Country, Income Level,
+# Etiology, AST Method) depending on the analysis needs.
+# Simply change the column name in the required_cols and subgroup
+# arguments accordingly.
+# ============================================================
+
+library(meta)
+library(readxl)
+library(writexl)
+library(openxlsx)
+library(dplyr)
+
+# ============================================================
+# 1. SET FILE PATH
+# ============================================================
+
+file_path <- "D:/Desktop/meta/KP.xlsx"
+
+# Get all sheet names
+sheet_names <- excel_sheets(file_path)
+cat("Sheets found:", paste(sheet_names, collapse = ", "), "\n\n")
+
+# Create a list to store all results
+all_results <- list()
+
+# ============================================================
+# 2. LOOP THROUGH EACH SHEET
+# ============================================================
+
+for (sheet_name in sheet_names) {
+  cat("Analyzing:", sheet_name, "\n")
+  
+  # Read current sheet data
+  ecoli <- read_excel(file_path, sheet = sheet_name)
+  
+  # Check for required columns
+  # NOTE: "AST Guideline" can be replaced with any subgroup variable
+  # (e.g., "Region", "Year", "Country", "Income Level", "Etiology",
+  # "AST Method", etc.)
+  required_cols <- c("Events", "Total", "study", "AST Guideline")
+  if(!all(required_cols %in% names(ecoli))) {
+    missing_cols <- setdiff(required_cols, names(ecoli))
+    cat("WARNING:", sheet_name, "missing columns:", paste(missing_cols, collapse = ", "), "- skipping subgroup analysis\n\n")
+    next
+  }
+  
+  # Data preprocessing: ensure Events and Total are numeric
+  ecoli <- ecoli %>%
+    mutate(
+      Events = as.numeric(Events),
+      Total = as.numeric(Total)
+    )
+  
+  # Data cleaning: remove missing values for Events, Total, and AST Guideline
+  ecoli_clean <- ecoli %>%
+    filter(
+      complete.cases(across(c("Events", "Total", "AST Guideline"))),
+      Total >= 10,
+      Events >= 0,
+      Events <= Total
+    )
+  
+  # Check if there is any data after cleaning
+  if(nrow(ecoli_clean) == 0) {
+    cat("WARNING:", sheet_name, "no valid data after cleaning - skipping subgroup analysis\n\n")
+    next
+  }
+  
+  # Display data cleaning info
+  removed_na <- nrow(ecoli) - nrow(ecoli %>% filter(complete.cases(across(c("Events", "Total", "AST Guideline")))))
+  removed_small <- nrow(ecoli %>% filter(complete.cases(across(c("Events", "Total", "AST Guideline"))))) - nrow(ecoli_clean)
+  total_removed <- removed_na + removed_small
+  
+  cat("  Data cleaning summary:\n")
+  cat("  - Original studies:", nrow(ecoli), "\n")
+  if(removed_na > 0) {
+    cat("  - Removed due to missing values:", removed_na, "\n")
+  }
+  if(removed_small > 0) {
+    cat("  - Removed due to Total < 10:", removed_small, "\n")
+  }
+  cat("  - Final studies included:", nrow(ecoli_clean), "\n")
+  
+  # Show removed small-sample studies
+  if(removed_small > 0) {
+    small_studies <- ecoli %>% 
+      filter(complete.cases(across(c("Events", "Total", "AST Guideline"))), Total < 10)
+    if(nrow(small_studies) > 0) {
+      cat("  - Removed small-sample studies:", paste(small_studies$study, collapse = ", "), "\n")
+    }
+  }
+  
+  # Check data types
+  cat("  Events data type:", class(ecoli_clean$Events), "\n")
+  cat("  Total data type:", class(ecoli_clean$Total), "\n")
+  cat("  Events range:", min(ecoli_clean$Events), "to", max(ecoli_clean$Events), "\n")
+  cat("  Total range:", min(ecoli_clean$Total), "to", max(ecoli_clean$Total), "\n")
+  
+  # ============================================================
+  # 3. SUBGROUP META-ANALYSIS
+  # ============================================================
+  # NOTE: Replace "AST Guideline" with any other subgroup variable
+  # (e.g., Year, Region, Country, Income Level, Etiology, AST Method)
+  # as needed for the analysis.
+  # ============================================================
+  
+  tryCatch({
+    meta.guideline <- metaprop(Events, Total, data = ecoli_clean,
+                        studlab = study,
+                        sm = "PFT",
+                        subgroup = `AST Guideline`,  # Replace with desired subgroup column
+                        overall = TRUE)
+    
+    # Generate subgroup forest plot PDF
+    pdf_file <- paste0("D:/Desktop/meta/", sheet_name, "_AST_Guideline_forest.pdf")
+    pdf(pdf_file, height = 35, width = 22, family = "Times")
+    
+    forest(meta.guideline, 
+           layout = "Revman",
+           leftcols = c("studlab", "event", "n", "effect.ci"),
+           rightcols = FALSE,
+           family = "Times",
+           fontsize = 19,
+           
+           # Color settings
+           col.vertical.line = "transparent",
+           col.diamond.common = "lightslategray",
+           col.diamond.lines.common = "lightslategray",
+           col.diamond.random = "#669999",
+           col.diamond.lines.random = "#669999",
+           col.square = "#336699",
+           col.square.lines = "#336699",
+           col.study = "#006666",
+           col.inside = "black",
+           col.label.right = "black",
+           col.random = "#660099",
+           col.subgroup = "#003399",
+           
+           # Display settings
+           overall = TRUE,
+           overall.hetstat = TRUE,
+           weight.study = "same",
+           squaresize = 1.0,
+           height = 0.9,
+           
+           # Layout settings
+           plotwidth = "18cm",
+           colgap.forest.left = "4cm",
+           colgap.left = "3.5cm",
+           
+           # Spacing settings
+           spacing = 1.5,
+           spacing.subgroup = 1.8,
+           
+           # Analysis settings
+           common = FALSE,
+           xlab = "",
+           xlim = c(0, 1),
+           smlab = "Proportion",
+           
+           # Font size: all set to 19
+           fs.hetstat = 19,
+           fs.test.subgroup = 19,
+           fs.test.overall = 19,
+           fs.heading = 19,
+           fs.study = 19,
+           fs.axis = 19,
+           fs.common = 19,
+           fs.random = 19,
+           fs.label = 19,
+           fs.xlab = 19,
+           fs.smlab = 19,
+           fs.subgroup = 19,
+           fs.subgroup.labels = 19,
+           fs.addline = 19,
+           
+           # Additional rows
+           addrow = TRUE,
+           addrow.overall = TRUE,
+           addrow.subgroups = TRUE,
+           addrow.after.subgroups = TRUE,
+           
+           # Margins
+           top = 4,
+           bottom = 4,
+           
+           # Line widths
+           lwd = 1.2,
+           lwd.square = 1.5,
+           lwd.diamond = 1.8)
+    
+    dev.off()
+    
+    cat("  Subgroup forest plot saved:", pdf_file, "\n")
+    
+    # Extract subgroup difference test results
+    subgroup_test <- data.frame(
+      Sheet_Name = sheet_name,
+      Test = c("Test for subgroup differences (Common effect)", 
+               "Test for subgroup differences (Random effects)"),
+      Chi_squared = c(meta.guideline$Q.b.common, meta.guideline$Q.b.random),
+      df = c(meta.guideline$df.Q.b.common, meta.guideline$df.Q.b.random),
+      P_value = c(meta.guideline$pval.Q.b.common, meta.guideline$pval.Q.b.random),
+      Status = "Success"
+    )
+    
+    # Extract detailed subgroup results
+    subgroup_details <- data.frame(
+      Sheet_Name = sheet_name,
+      AST_Guideline = c(meta.guideline$bylevs, "Overall"),
+      Studies = c(meta.guideline$k.w, meta.guideline$k),
+      Events = c(meta.guideline$event.w, sum(meta.guideline$event)),
+      Total = c(meta.guideline$n.w, sum(meta.guideline$n)),
+      Proportion = c(meta.guideline$TE.w, meta.guideline$TE.random),
+      CI_lower = c(meta.guideline$lower.w, meta.guideline$lower.random),
+      CI_upper = c(meta.guideline$upper.w, meta.guideline$upper.random),
+      I2 = c(meta.guideline$I2.w, meta.guideline$I2),
+      Status = "Success"
+    )
+    
+    # Store results
+    all_results[[sheet_name]] <- list(
+      meta_object = meta.guideline,
+      subgroup_test = subgroup_test,
+      subgroup_details = subgroup_details,
+      cleaned_data = ecoli_clean,
+      removed_na = removed_na,
+      removed_small = removed_small,
+      analysis_success = TRUE
+    )
+    
+    # Display brief results
+    cat("  Subgroup analysis results:", meta.guideline$k, "studies,",
+        length(meta.guideline$bylevs), "AST guideline groups\n")
+    cat("  P-value for subgroup differences (random effects):", round(meta.guideline$pval.Q.b.random, 4), "\n\n")
+    
+  }, error = function(e) {
+    cat("  Meta-analysis error:", e$message, "\n")
+    
+    # Save basic info even if error occurs
+    subgroup_test <- data.frame(
+      Sheet_Name = sheet_name,
+      Test = c("Test for subgroup differences (Common effect)", 
+               "Test for subgroup differences (Random effects)"),
+      Chi_squared = NA,
+      df = NA,
+      P_value = NA,
+      Status = paste("Error:", e$message)
+    )
+    
+    # Calculate basic statistics
+    if(nrow(ecoli_clean) > 0) {
+      total_events <- sum(ecoli_clean$Events, na.rm = TRUE)
+      total_participants <- sum(ecoli_clean$Total, na.rm = TRUE)
+      guideline_counts <- table(ecoli_clean$`AST Guideline`)
+      
+      subgroup_details <- data.frame(
+        Sheet_Name = sheet_name,
+        AST_Guideline = c(names(guideline_counts), "Overall"),
+        Studies = c(as.numeric(guideline_counts), nrow(ecoli_clean)),
+        Events = c(rep(NA, length(guideline_counts)), total_events),
+        Total = c(rep(NA, length(guideline_counts)), total_participants),
+        Proportion = NA,
+        CI_lower = NA,
+        CI_upper = NA,
+        I2 = NA,
+        Status = paste("Error:", e$message)
+      )
+    } else {
+      subgroup_details <- data.frame(
+        Sheet_Name = sheet_name,
+        AST_Guideline = "No data",
+        Studies = 0,
+        Events = 0,
+        Total = 0,
+        Proportion = NA,
+        CI_lower = NA,
+        CI_upper = NA,
+        I2 = NA,
+        Status = paste("Error:", e$message)
+      )
+    }
+    
+    all_results[[sheet_name]] <- list(
+      meta_object = NULL,
+      subgroup_test = subgroup_test,
+      subgroup_details = subgroup_details,
+      cleaned_data = ecoli_clean,
+      removed_na = removed_na,
+      removed_small = removed_small,
+      analysis_success = FALSE
+    )
+    
+    cat("  Error recorded, continuing to next sheet\n\n")
+  })
+}
+
+# ============================================================
+# 4. SAVE ALL RESULTS TO EXCEL
+# ============================================================
+
+if(length(all_results) > 0) {
+  # Combine subgroup test results
+  all_subgroup_tests <- do.call(rbind, lapply(all_results, function(x) x$subgroup_test))
+  
+  # Combine subgroup detailed results
+  all_subgroup_details <- do.call(rbind, lapply(all_results, function(x) x$subgroup_details))
+  
+  # Create workbook
+  wb <- createWorkbook()
+  
+  # Add subgroup test summary sheet
+  addWorksheet(wb, "AST_Guideline_Subgroup_Tests")
+  writeData(wb, "AST_Guideline_Subgroup_Tests", all_subgroup_tests)
+  
+  # Add subgroup results detail sheet
+  addWorksheet(wb, "AST_Guideline_Subgroup_Results")
+  writeData(wb, "AST_Guideline_Subgroup_Results", all_subgroup_details)
+  
+  # Add individual sheet results
+  for(sheet_name in names(all_results)) {
+    # Check if meta_object exists and is not NULL
+    if(!is.null(all_results[[sheet_name]]$meta_object) && all_results[[sheet_name]]$analysis_success) {
+      # Shorten sheet name to ensure max 31 characters
+      short_sheet_name <- substr(sheet_name, 1, min(20, nchar(sheet_name)))
+      data_sheet_name <- paste0("AST_", short_sheet_name)
+      
+      if(nchar(data_sheet_name) > 31) {
+        data_sheet_name <- substr(data_sheet_name, 1, 31)
+      }
+      
+      # Study-level data
+      study_level_data <- data.frame(
+        Study = all_results[[sheet_name]]$meta_object$studlab,
+        AST_Guideline = all_results[[sheet_name]]$meta_object$byvar,
+        Events = all_results[[sheet_name]]$meta_object$event,
+        Total = all_results[[sheet_name]]$meta_object$n,
+        Proportion = round(all_results[[sheet_name]]$meta_object$TE, 4)
+      )
+      
+      addWorksheet(wb, data_sheet_name)
+      writeData(wb, data_sheet_name, study_level_data)
+    }
+    
+    # Add cleaned data (regardless of analysis success)
+    short_sheet_name <- substr(sheet_name, 1, min(20, nchar(sheet_name)))
+    cleaned_sheet_name <- paste0("Clean_", short_sheet_name)
+    
+    if(nchar(cleaned_sheet_name) > 31) {
+      cleaned_sheet_name <- substr(cleaned_sheet_name, 1, 31)
+    }
+    
+    addWorksheet(wb, cleaned_sheet_name)
+    writeData(wb, cleaned_sheet_name, all_results[[sheet_name]]$cleaned_data)
+  }
+  
+  # Save workbook
+  results_file <- "D:/Desktop/meta/All_Sheets_AST_Guideline_Analysis.xlsx"
+  saveWorkbook(wb, results_file, overwrite = TRUE)
+  
+  cat("=== AST Guideline subgroup analysis complete ===\n")
+  cat("Processed", length(all_results), "sheets for AST Guideline subgroup data\n")
+  
+  # Count successes and failures
+  success_count <- sum(sapply(all_results, function(x) x$analysis_success))
+  error_count <- length(all_results) - success_count
+  
+  cat("Successful sheets:", success_count, "\n")
+  cat("Failed sheets:", error_count, "\n")
+  cat("Forest plots saved in: D:/Desktop/meta/ (ending with _AST_Guideline_forest.pdf)\n")
+  cat("Summary results saved in:", results_file, "\n")
+  cat("Settings: weight column removed, all fonts 19pt, spacious layout\n")
+  
+  # Show sheets with significant subgroup differences
+  cat("\n=== Sheets with significant AST Guideline subgroup differences ===\n")
+  significant_sheets <- unique(all_subgroup_tests$Sheet_Name[all_subgroup_tests$P_value < 0.05 & 
+                                                             grepl("Random", all_subgroup_tests$Test) &
+                                                             !is.na(all_subgroup_tests$P_value)])
+  if(length(significant_sheets) > 0) {
+    cat(paste(significant_sheets, collapse = ", "), "\n")
+  } else {
+    cat("No significant AST Guideline subgroup differences\n")
+  }
+  
+  # Show AST guideline distribution per sheet
+  cat("\n=== AST guideline distribution per sheet ===\n")
+  for(sheet_name in names(all_results)) {
+    if(all_results[[sheet_name]]$analysis_success) {
+      guidelines <- unique(all_results[[sheet_name]]$subgroup_details$AST_Guideline)
+      guidelines <- guidelines[guidelines != "Overall"]
+      cat(sheet_name, ":", length(guidelines), "AST guideline groups -", paste(guidelines, collapse = ", "), "\n")
+    } else {
+      cat(sheet_name, ": analysis failed -", all_results[[sheet_name]]$subgroup_details$Status[1], "\n")
+    }
+  }
+  
+  # Show data cleaning summary
+  cat("\n=== Data cleaning summary ===\n")
+  for(sheet_name in names(all_results)) {
+    original_count <- nrow(read_excel(file_path, sheet = sheet_name))
+    cleaned_count <- nrow(all_results[[sheet_name]]$cleaned_data)
+    removed_na <- all_results[[sheet_name]]$removed_na
+    removed_small <- all_results[[sheet_name]]$removed_small
+    
+    cat(sheet_name, ": ", original_count, "original ->", cleaned_count, "included\n")
+    if(removed_na > 0 | removed_small > 0) {
+      cat("     Removed due to: missing values(", removed_na, "), small samples(", removed_small, ")\n")
+    }
+  }
+  
+} else {
+  cat("=== WARNING ===\n")
+  cat("No sheets found containing required columns (Events, Total, study, AST Guideline)\n")
+}

@@ -1,0 +1,813 @@
+# ============================================================
+# SINGLE-PROPORTION META-REGRESSION
+# Aligned with Stata results
+# REML estimation, Z test, 0.5 correction
+# Beta and OR reported
+# ============================================================
+
+library(meta)
+library(metafor)
+library(ggplot2)
+library(readxl)
+library(openxlsx)
+library(grid)
+
+# ============================================================
+# 1. FILE PATH AND SETTINGS
+# ============================================================
+
+file_path <- "D:/Desktop/meta/E.coli.xlsx"
+sheet_names <- getSheetNames(file_path)
+
+# Output directory
+output_dir <- "D:/Desktop/meta"
+results_file <- file.path(output_dir, "Meta_Regression_Results_StataAlign.xlsx")
+
+# ============================================================
+# 2. CREATE RESULTS DATA FRAME
+# ============================================================
+
+all_results <- data.frame(
+  SheetName = character(),
+  StudyCount = integer(),
+  Intercept = numeric(),
+  Beta_Per_Year = numeric(),
+  Beta_SE = numeric(),
+  Beta_CI_Lower = numeric(),
+  Beta_CI_Upper = numeric(),
+  P_Value = numeric(),
+  OR_Per_Year = numeric(),
+  OR_CI_Lower = numeric(),
+  OR_CI_Upper = numeric(),
+  Tau2 = numeric(),
+  I2 = numeric(),
+  R2_Heterogeneity = numeric(),
+  Mean_Resistance = numeric(),
+  SD_Resistance = numeric(),
+  Min_Resistance = numeric(),
+  Max_Resistance = numeric(),
+  stringsAsFactors = FALSE
+)
+
+detailed_results <- data.frame(
+  SheetName = character(),
+  Study = character(),
+  Year = numeric(),
+  Events = numeric(),
+  Total = numeric(),
+  ResistanceRate = numeric(),
+  yi_logit = numeric(),
+  vi_logit = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# ============================================================
+# 3. P-VALUE FORMATTING FUNCTION
+# ============================================================
+
+format_p_value <- function(p_val) {
+  if (is.na(p_val)) {
+    return("NA")
+  } else if (p_val < 0.001) {
+    return("< 0.001")
+  } else {
+    return(paste0("= ", formatC(p_val, format = "f", digits = 3)))
+  }
+}
+
+# ============================================================
+# 4. LOOP THROUGH EACH SHEET
+# ============================================================
+
+for (sheet_name in sheet_names) {
+
+  cat("\n========================================\n")
+  cat("Processing:", sheet_name, "\n")
+
+  # ----------------------------------------------------------
+  # 4.1 Read data
+  # ----------------------------------------------------------
+
+  ecoli <- read_excel(file_path, sheet = sheet_name)
+
+  required_cols <- c("Events", "Total", "study", "year")
+
+  if (!all(required_cols %in% colnames(ecoli))) {
+    warning(paste("Sheet", sheet_name, "missing required columns - skipping"))
+    next
+  }
+
+  # ----------------------------------------------------------
+  # 4.2 Data cleaning
+  # ----------------------------------------------------------
+
+  ecoli_clean <- ecoli[
+    complete.cases(ecoli[, c("Events", "Total", "study", "year")]),
+  ]
+
+  if (nrow(ecoli_clean) == 0) {
+    cat("WARNING:", sheet_name, "no valid data after cleaning - skipping\n")
+    next
+  }
+
+  removed_count <- nrow(ecoli) - nrow(ecoli_clean)
+
+  if (removed_count > 0) {
+    cat("Removed", removed_count, "rows with missing data\n")
+    cat("Remaining", nrow(ecoli_clean), "rows of valid data\n")
+  }
+
+  ecoli_clean$Events <- as.numeric(ecoli_clean$Events)
+  ecoli_clean$Total <- as.numeric(ecoli_clean$Total)
+  ecoli_clean$year <- as.numeric(ecoli_clean$year)
+
+  # Basic validity check
+  valid_rows <- (
+    is.finite(ecoli_clean$Events) &
+    is.finite(ecoli_clean$Total) &
+    is.finite(ecoli_clean$year) &
+    ecoli_clean$Total > 0 &
+    ecoli_clean$Events >= 0 &
+    ecoli_clean$Events <= ecoli_clean$Total
+  )
+
+  if (any(!valid_rows)) {
+    cat("Removed", sum(!valid_rows), "rows with invalid Events/Total/year data\n")
+    ecoli_clean <- ecoli_clean[valid_rows, ]
+  }
+
+  if (nrow(ecoli_clean) == 0) {
+    cat("WARNING:", sheet_name, "no valid data after validation - skipping\n")
+    next
+  }
+
+  # ----------------------------------------------------------
+  # 4.3 0.5 correction (consistent with Stata default)
+  # ----------------------------------------------------------
+
+  ecoli_clean$events_adj <- ecoli_clean$Events + 0.5
+  ecoli_clean$total_adj <- ecoli_clean$Total + 1
+
+  # ----------------------------------------------------------
+  # 4.4 Build logit proportion effect sizes
+  # ----------------------------------------------------------
+
+  escalc_data <- escalc(
+    measure = "PLO",
+    xi = events_adj,
+    ni = total_adj,
+    data = ecoli_clean
+  )
+
+  plot_data <- data.frame(
+    study = ecoli_clean$study,
+    year = ecoli_clean$year,
+    yi = escalc_data$yi,
+    vi = escalc_data$vi,
+    Events = ecoli_clean$Events,
+    Total = ecoli_clean$Total,
+    percent = (ecoli_clean$Events / ecoli_clean$Total) * 100
+  )
+
+  # ----------------------------------------------------------
+  # 4.5 Save detailed data
+  # ----------------------------------------------------------
+
+  detailed_results <- rbind(
+    detailed_results,
+    data.frame(
+      SheetName = sheet_name,
+      Study = plot_data$study,
+      Year = plot_data$year,
+      Events = plot_data$Events,
+      Total = plot_data$Total,
+      ResistanceRate = round(plot_data$percent, 2),
+      yi_logit = round(plot_data$yi, 6),
+      vi_logit = round(plot_data$vi, 6)
+    )
+  )
+
+  # ----------------------------------------------------------
+  # 4.6 Descriptive statistics
+  # ----------------------------------------------------------
+
+  mean_resistance <- mean(plot_data$percent, na.rm = TRUE)
+  sd_resistance <- sd(plot_data$percent, na.rm = TRUE)
+  min_resistance <- min(plot_data$percent, na.rm = TRUE)
+  max_resistance <- max(plot_data$percent, na.rm = TRUE)
+
+  # ----------------------------------------------------------
+  # 4.7 At least 10 studies required for meta-regression
+  # ----------------------------------------------------------
+
+  if (nrow(plot_data) < 10) {
+
+    cat(
+      "WARNING:", sheet_name,
+      "only", nrow(plot_data),
+      "studies (<10), skipping meta-regression\n"
+    )
+
+    all_results <- rbind(
+      all_results,
+      data.frame(
+        SheetName = sheet_name,
+        StudyCount = nrow(plot_data),
+        Intercept = NA,
+        Beta_Per_Year = NA,
+        Beta_SE = NA,
+        Beta_CI_Lower = NA,
+        Beta_CI_Upper = NA,
+        P_Value = NA,
+        OR_Per_Year = NA,
+        OR_CI_Lower = NA,
+        OR_CI_Upper = NA,
+        Tau2 = NA,
+        I2 = NA,
+        R2_Heterogeneity = NA,
+        Mean_Resistance = round(mean_resistance, 2),
+        SD_Resistance = round(sd_resistance, 2),
+        Min_Resistance = round(min_resistance, 2),
+        Max_Resistance = round(max_resistance, 2)
+      )
+    )
+
+    next
+  }
+
+  # ----------------------------------------------------------
+  # 4.8 Check for year variation
+  # ----------------------------------------------------------
+
+  if (length(unique(plot_data$year)) < 2) {
+
+    cat("WARNING:", sheet_name, "no year variation, skipping trend meta-regression\n")
+
+    all_results <- rbind(
+      all_results,
+      data.frame(
+        SheetName = sheet_name,
+        StudyCount = nrow(plot_data),
+        Intercept = NA,
+        Beta_Per_Year = NA,
+        Beta_SE = NA,
+        Beta_CI_Lower = NA,
+        Beta_CI_Upper = NA,
+        P_Value = NA,
+        OR_Per_Year = NA,
+        OR_CI_Lower = NA,
+        OR_CI_Upper = NA,
+        Tau2 = NA,
+        I2 = NA,
+        R2_Heterogeneity = NA,
+        Mean_Resistance = round(mean_resistance, 2),
+        SD_Resistance = round(sd_resistance, 2),
+        Min_Resistance = round(min_resistance, 2),
+        Max_Resistance = round(max_resistance, 2)
+      )
+    )
+
+    next
+  }
+
+  # ----------------------------------------------------------
+  # 4.9 Year centering (changes intercept only, not slope)
+  # ----------------------------------------------------------
+
+  mean_year <- mean(plot_data$year)
+  plot_data$year_c <- plot_data$year - mean_year
+
+  # ----------------------------------------------------------
+  # 4.10 Random-effects meta-regression (aligned with Stata)
+  #      method = "REML" matches Stata's meta regress
+  #      test = "z" matches Stata's standard error method
+  # ----------------------------------------------------------
+
+  meta_reg <- tryCatch(
+    {
+      rma(
+        yi = yi,
+        vi = vi,
+        mods = ~ year_c,
+        data = plot_data,
+        method = "REML",
+        test = "z"
+      )
+    },
+    error = function(e) {
+      cat("Meta-regression failed:", conditionMessage(e), "\n")
+      return(NULL)
+    }
+  )
+
+  if (is.null(meta_reg)) {
+    next
+  }
+
+  # ----------------------------------------------------------
+  # 4.11 Extract meta-regression results
+  # ----------------------------------------------------------
+
+  intercept <- as.numeric(coef(meta_reg)[1])
+
+  beta <- as.numeric(coef(meta_reg)[2])
+  beta_se <- as.numeric(meta_reg$se[2])
+  beta_ci_lower <- as.numeric(meta_reg$ci.lb[2])
+  beta_ci_upper <- as.numeric(meta_reg$ci.ub[2])
+  p_value <- as.numeric(meta_reg$pval[2])
+
+  # Odds ratio per 1-year increase
+  or_per_year <- exp(beta)
+  or_ci_lower <- exp(beta_ci_lower)
+  or_ci_upper <- exp(beta_ci_upper)
+
+  # Residual between-study heterogeneity
+  tau2 <- as.numeric(meta_reg$tau2)
+  i2 <- as.numeric(meta_reg$I2)
+
+  # Calculate marginal R² (consistent with Stata)
+  # R² = (τ²_null - τ²_full) / τ²_null × 100%
+  null_model <- tryCatch(
+    {
+      rma(
+        yi = yi,
+        vi = vi,
+        data = plot_data,
+        method = "REML"
+      )
+    },
+    error = function(e) {
+      return(NULL)
+    }
+  )
+
+  if (!is.null(null_model) && null_model$tau2 > 0) {
+    r_squared <- (null_model$tau2 - meta_reg$tau2) / null_model$tau2 * 100
+    # Prevent numeric overflow
+    if (r_squared < 0) r_squared <- 0
+    if (r_squared > 100) r_squared <- 100
+  } else {
+    r_squared <- NA
+  }
+
+  # ----------------------------------------------------------
+  # 4.12 Save summary results
+  # ----------------------------------------------------------
+
+  all_results <- rbind(
+    all_results,
+    data.frame(
+      SheetName = sheet_name,
+      StudyCount = nrow(plot_data),
+      Intercept = round(intercept, 6),
+      Beta_Per_Year = round(beta, 6),
+      Beta_SE = round(beta_se, 6),
+      Beta_CI_Lower = round(beta_ci_lower, 6),
+      Beta_CI_Upper = round(beta_ci_upper, 6),
+      P_Value = signif(p_value, 4),
+      OR_Per_Year = round(or_per_year, 4),
+      OR_CI_Lower = round(or_ci_lower, 4),
+      OR_CI_Upper = round(or_ci_upper, 4),
+      Tau2 = round(tau2, 6),
+      I2 = round(i2, 2),
+      R2_Heterogeneity = ifelse(is.na(r_squared), NA, round(r_squared, 2)),
+      Mean_Resistance = round(mean_resistance, 2),
+      SD_Resistance = round(sd_resistance, 2),
+      Min_Resistance = round(min_resistance, 2),
+      Max_Resistance = round(max_resistance, 2)
+    )
+  )
+
+  # ----------------------------------------------------------
+  # 4.13 Meta-regression predictions
+  # ----------------------------------------------------------
+
+  year_range <- seq(
+    min(plot_data$year),
+    max(plot_data$year),
+    length.out = 100
+  )
+
+  year_range_c <- year_range - mean_year
+
+  pred <- predict(
+    meta_reg,
+    newmods = year_range_c
+  )
+
+  trend_data <- data.frame(
+    year = year_range,
+    predicted = plogis(pred$pred) * 100,
+    ci_lower = plogis(pred$ci.lb) * 100,
+    ci_upper = plogis(pred$ci.ub) * 100
+  )
+
+  # ----------------------------------------------------------
+  # 4.14 Format P value
+  # ----------------------------------------------------------
+
+  corrected_p_value <- format_p_value(p_value)
+
+  # ----------------------------------------------------------
+  # 4.15 Bubble plot (showing both Beta and OR)
+  # ----------------------------------------------------------
+
+  bubble_plot <- ggplot() +
+
+    geom_ribbon(
+      data = trend_data,
+      aes(
+        x = year,
+        ymin = ci_lower,
+        ymax = ci_upper
+      ),
+      alpha = 0.25
+    ) +
+
+    geom_line(
+      data = trend_data,
+      aes(
+        x = year,
+        y = predicted
+      ),
+      linewidth = 1.3
+    ) +
+
+    geom_point(
+      data = plot_data,
+      aes(
+        x = year,
+        y = percent,
+        size = Total
+      ),
+      alpha = 0.7
+    ) +
+
+    scale_size_continuous(
+      range = c(4, 15),
+      name = "Sample Size"
+    ) +
+
+    scale_y_continuous(
+      labels = scales::percent_format(scale = 1),
+      limits = c(0, 100)
+    ) +
+
+    labs(
+      title = paste("Random-effects Meta-regression:", sheet_name),
+      x = "Publication Year",
+      y = "Resistance Rate (%)",
+      caption = paste0(
+        "\u03b2/year = ", round(beta, 4),
+        " (95% CI ", round(beta_ci_lower, 4),
+        " to ", round(beta_ci_upper, 4), "); ",
+        "OR/year = ", round(or_per_year, 3),
+        " (95% CI ", round(or_ci_lower, 3),
+        " to ", round(or_ci_upper, 3), "); ",
+        "p ", corrected_p_value,
+        "; R\u00b2 = ",
+        ifelse(
+          is.na(r_squared),
+          "NA",
+          paste0(round(r_squared, 1), "%")
+        )
+      )
+    ) +
+
+    theme_minimal(base_size = 18) +
+
+    theme(
+      plot.title = element_text(
+        face = "bold",
+        hjust = 0,
+        size = 22,
+        margin = margin(b = 15)
+      ),
+      plot.caption = element_text(
+        size = 14,
+        hjust = 0.5
+      ),
+      axis.title = element_text(
+        size = 18,
+        face = "bold"
+      ),
+      axis.text = element_text(
+        size = 18
+      ),
+      axis.text.x = element_text(
+        angle = 0,
+        hjust = 0.5
+      ),
+      legend.title = element_text(
+        size = 18,
+        face = "bold"
+      ),
+      legend.text = element_text(
+        size = 18
+      ),
+      legend.position = "right",
+      legend.box.spacing = unit(0.5, "cm"),
+      plot.margin = margin(25, 25, 25, 25),
+      panel.grid.major = element_line(linewidth = 0.5),
+      panel.grid.minor = element_blank()
+    ) +
+
+    guides(
+      size = guide_legend(
+        override.aes = list(alpha = 1)
+      )
+    )
+
+  # ----------------------------------------------------------
+  # 4.16 Save PDF
+  # ----------------------------------------------------------
+
+  safe_sheet_name <- gsub(
+    "[^a-zA-Z0-9_-]",
+    "_",
+    sheet_name
+  )
+
+  file_name <- file.path(
+    output_dir,
+    paste0(
+      "Meta_Regression_StataAlign_",
+      safe_sheet_name,
+      ".pdf"
+    )
+  )
+
+  pdf(
+    file_name,
+    width = 14,
+    height = 10
+  )
+
+  print(bubble_plot)
+
+  dev.off()
+
+  # ----------------------------------------------------------
+  # 4.17 Console output (showing both Beta and OR)
+  # ----------------------------------------------------------
+
+  cat("Completed:", sheet_name, "\n")
+  cat("Saved file:", file_name, "\n")
+  cat("Number of studies:", nrow(plot_data), "\n")
+
+  cat(
+    "Beta/year:",
+    round(beta, 4),
+    "95% CI:",
+    round(beta_ci_lower, 4),
+    "to",
+    round(beta_ci_upper, 4),
+    "\n"
+  )
+
+  cat(
+    "OR/year:",
+    round(or_per_year, 3),
+    "95% CI:",
+    round(or_ci_lower, 3),
+    "to",
+    round(or_ci_upper, 3),
+    "\n"
+  )
+
+  cat(
+    "P-value:",
+    corrected_p_value,
+    "\n"
+  )
+
+  cat(
+    "Tau^2:",
+    round(tau2, 4),
+    "I^2:",
+    round(i2, 1),
+    "%",
+    "R^2:",
+    ifelse(
+      is.na(r_squared),
+      "NA",
+      paste0(round(r_squared, 1), "%")
+    ),
+    "\n"
+  )
+
+  cat("----------------------------------------\n")
+}
+
+# ============================================================
+# 5. CREATE EXCEL WORKBOOK
+# ============================================================
+
+wb <- createWorkbook()
+
+# ------------------------------------------------------------
+# 5.1 Summary results
+# ------------------------------------------------------------
+
+addWorksheet(wb, "Summary_Results")
+writeData(wb, "Summary_Results", all_results)
+
+# ------------------------------------------------------------
+# 5.2 Detailed study-level data
+# ------------------------------------------------------------
+
+addWorksheet(wb, "Detailed_Results")
+writeData(wb, "Detailed_Results", detailed_results)
+
+# ------------------------------------------------------------
+# 5.3 Data cleaning summary
+# ------------------------------------------------------------
+
+if (nrow(all_results) > 0) {
+
+  total_original <- 0
+  total_cleaned <- 0
+  total_analyzed <- 0
+
+  for (sheet_name in sheet_names) {
+
+    ecoli <- read_excel(
+      file_path,
+      sheet = sheet_name
+    )
+
+    if (!all(
+      c("Events", "Total", "study", "year") %in% colnames(ecoli)
+    )) {
+      next
+    }
+
+    total_original <- total_original + nrow(ecoli)
+
+    ecoli_clean <- ecoli[
+      complete.cases(
+        ecoli[, c("Events", "Total", "study", "year")]
+      ),
+    ]
+
+    ecoli_clean$Events <- suppressWarnings(
+      as.numeric(ecoli_clean$Events)
+    )
+    ecoli_clean$Total <- suppressWarnings(
+      as.numeric(ecoli_clean$Total)
+    )
+    ecoli_clean$year <- suppressWarnings(
+      as.numeric(ecoli_clean$year)
+    )
+
+    valid_rows <- (
+      is.finite(ecoli_clean$Events) &
+      is.finite(ecoli_clean$Total) &
+      is.finite(ecoli_clean$year) &
+      ecoli_clean$Total > 0 &
+      ecoli_clean$Events >= 0 &
+      ecoli_clean$Events <= ecoli_clean$Total
+    )
+
+    ecoli_clean <- ecoli_clean[valid_rows, ]
+
+    total_cleaned <- total_cleaned + nrow(ecoli_clean)
+
+    if (
+      nrow(ecoli_clean) >= 10 &&
+      length(unique(ecoli_clean$year)) >= 2
+    ) {
+      total_analyzed <- total_analyzed + nrow(ecoli_clean)
+    }
+  }
+
+  total_removed <- total_original - total_cleaned
+  total_skipped <- total_cleaned - total_analyzed
+
+  data_cleaning_summary <- data.frame(
+    Description = c(
+      "Total original data rows",
+      "Total cleaned data rows",
+      "Total meta-regression data rows",
+      "Total rows removed due to missing/invalid data",
+      "Total rows skipped (insufficient studies or no year variation)",
+      "Data cleaning retention rate",
+      "Meta-regression analysis rate"
+    ),
+    Value = c(
+      total_original,
+      total_cleaned,
+      total_analyzed,
+      total_removed,
+      total_skipped,
+      paste0(
+        round(
+          total_cleaned / total_original * 100,
+          1
+        ),
+        "%"
+      ),
+      paste0(
+        round(
+          total_analyzed / total_cleaned * 100,
+          1
+        ),
+        "%"
+      )
+    )
+  )
+
+  addWorksheet(
+    wb,
+    "Data_Cleaning_Summary"
+  )
+
+  writeData(
+    wb,
+    "Data_Cleaning_Summary",
+    data_cleaning_summary
+  )
+}
+
+# ------------------------------------------------------------
+# 5.4 Readme
+# ------------------------------------------------------------
+
+addWorksheet(wb, "Readme")
+
+readme_text <- data.frame(
+  Column = c(
+    "Summary_Results Sheet:",
+    "SheetName", "StudyCount", "Intercept", "Beta_Per_Year",
+    "Beta_SE", "Beta_CI_Lower", "Beta_CI_Upper", "P_Value",
+    "OR_Per_Year", "OR_CI_Lower", "OR_CI_Upper",
+    "Tau2", "I2", "R2_Heterogeneity",
+    "Mean_Resistance", "SD_Resistance", "Min_Resistance", "Max_Resistance",
+    "",
+    "Detailed_Results Sheet:",
+    "SheetName", "Study", "Year", "Events", "Total",
+    "ResistanceRate", "yi_logit", "vi_logit",
+    "",
+    "Analysis principles:",
+    "1. PLO + REML + Z test + 0.5 correction + year centering + marginal R2",
+    "2. At least 10 studies required for meta-regression",
+    "3. Bubble size represents sample size (visualization only)"
+  ),
+  Description = c(
+    "",
+    "Sheet name", "Number of studies", "Model intercept (log-odds)", "Beta/year (log-odds)",
+    "Beta SE", "Beta 95% CI lower", "Beta 95% CI upper", "P-value (Z test)",
+    "OR/year", "OR 95% CI lower", "OR 95% CI upper",
+    "tau^2", "I^2(%)", "Marginal R²(%)",
+    "Mean resistance rate (%)", "SD of resistance", "Minimum resistance rate (%)", "Maximum resistance rate (%)",
+    "",
+    "",
+    "Sheet name", "Study name", "Publication year", "Event count", "Total sample size",
+    "Resistance rate (%)", "Logit-transformed value", "Sampling variance",
+    "",
+    "",
+    "Aligned with Stata meta regress (REML + z test)",
+    "events=0 or events=total are retained via 0.5 correction",
+    "No studies are deleted"
+  )
+)
+
+writeData(
+  wb,
+  "Readme",
+  readme_text
+)
+
+# ============================================================
+# 6. SAVE EXCEL
+# ============================================================
+
+saveWorkbook(
+  wb,
+  results_file,
+  overwrite = TRUE
+)
+
+cat("\nAll sheets processed!\n")
+cat("Results saved to:", results_file, "\n")
+cat("Contents:\n")
+cat("- Summary_Results: Random-effects meta-regression summary\n")
+cat("- Detailed_Results: Study-level raw data and logit effect sizes\n")
+cat("- Data_Cleaning_Summary: Data cleaning summary\n")
+cat("- Readme: Variable and method descriptions\n")
+
+cat(
+  "Sheets included in meta-regression results table:",
+  sum(
+    !is.na(all_results$Beta_Per_Year)
+  ),
+  "\n"
+)
+
+cat(
+  "Sheets not analyzed by meta-regression:",
+  sum(
+    is.na(all_results$Beta_Per_Year)
+  ),
+  "\n"
+)
