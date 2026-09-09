@@ -7,7 +7,7 @@ library(readxl)
 library(metafor)
 
 # File path
-file_path <- "D:/Desktop/meta/E.coli.xlsx"
+file_path <- file.path("path", "to", "your", "data.xlsx")
 sheet_names <- excel_sheets(file_path)
 
 # Results container

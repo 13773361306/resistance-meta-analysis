@@ -16,7 +16,7 @@ library(grid)
 # 1. FILE PATH AND SETTINGS
 # ============================================================
 
-file_path <- "D:/Desktop/meta/E.coli.xlsx"
+file_path <- file.path("path", "to", "your", "data.xlsx")
 sheet_names <- getSheetNames(file_path)
 
 # Output directory

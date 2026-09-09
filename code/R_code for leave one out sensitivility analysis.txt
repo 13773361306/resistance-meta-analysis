@@ -14,7 +14,7 @@ library(purrr)
 # ============================================================
 
 config <- list(
-  file_path = "D:/Desktop/meta/E.coli.xlsx",
+  file_path <- file.path("path", "to", "your", "data.xlsx"),
   required_cols = c("Events", "Total", "study"),
   results_dir = "D:/Desktop/meta/",
   min_studies = 5

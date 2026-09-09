@@ -1,6 +1,5 @@
 * ============================================================
 * SINGLE-PROPORTION META-REGRESSION (STATA)
-* Aligned with R code using PLO (logit) + 0.5 correction
 * ============================================================
 
 * 1. Data cleaning (keep studies with events=total)

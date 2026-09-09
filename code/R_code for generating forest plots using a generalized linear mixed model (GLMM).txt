@@ -14,7 +14,7 @@ library(readxl)
 library(openxlsx)
 library(dplyr)
 
-file_path <- "D:/Desktop/meta/E.coli.xlsx"
+file_path <- file.path("path", "to", "your", "data.xlsx")
 sheet_names <- excel_sheets(file_path)
 cat("Sheets found:", paste(sheet_names, collapse = ", "), "\n\n")
 

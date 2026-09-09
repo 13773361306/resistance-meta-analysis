@@ -21,7 +21,7 @@ library(dplyr)
 # 1. SET FILE PATH
 # ============================================================
 
-file_path <- "D:/Desktop/meta/KP.xlsx"
+file_path <- file.path("path", "to", "your", "data.xlsx")
 
 # Get all sheet names
 sheet_names <- excel_sheets(file_path)
