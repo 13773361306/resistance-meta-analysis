@@ -32,7 +32,7 @@ A comprehensive R pipeline for single‑proportion meta‑analysis of antimicrob
 
 ```
 .
-├── R/
+├── code/
 │   ├── main_meta_analysis_PFT.R          # Single‑proportion meta‑analysis (PFT + REML)
 │   ├── main_meta_analysis_GLMM.R         # GLMM meta‑analysis (binomial logit + ML)
 │   ├── subgroup_analysis.R               # Subgroup meta‑analysis (configurable variable)
