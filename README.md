@@ -4,9 +4,8 @@ A comprehensive R pipeline for single‑proportion meta‑analysis of antimicrob
 
 ## Features
 
-- **Multiple meta‑analysis models**
+- **Meta‑analysis models**
   - Freeman‑Tukey double arcsine transformation (PFT) with random‑effects REML
-  - Generalized linear mixed model (GLMM) with logit link
 - **Subgroup analysis**
   - Any categorical variable (AST guideline, region, income level, year group, etc.)
   - Test for subgroup differences (random‑effects Q‑test)
