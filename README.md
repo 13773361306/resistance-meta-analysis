@@ -33,17 +33,18 @@ A comprehensive R pipeline for single‑proportion meta‑analysis of antimicrob
 ```
 .
 ├── code/
-│   ├── main_meta_analysis_PFT.R          # Single‑proportion meta‑analysis (PFT + REML)
-│   ├── main_meta_analysis_GLMM.R         # GLMM meta‑analysis (binomial logit + ML)
-│   ├── subgroup_analysis.R               # Subgroup meta‑analysis (configurable variable)
-│   ├── meta_regression.R                 # Temporal meta‑regression (PLO + REML)
-│   ├── leave_one_out_sensitivity.R       # Leave‑one‑out sensitivity analysis
-│   ├── egger_test_funnel.R               # Egger's test + funnel plots
-│   └── utils.R                           # Common helper functions
+│   ├── R_forest_PFT.R                    # Forest plots (PFT + REML)
+│   ├── R_forest_GLMM.R                   # Forest plots (GLMM)
+│   ├── R_subgroup_analysis.R             # Subgroup meta-analysis
+│   ├── R_meta_regression.R               # Temporal meta-regression
+│   ├── R_leave_one_out.R                 # Leave-one-out sensitivity
+│   ├── R_funnel_egger.R                  # Funnel plots + Egger's test
+│   ├── STATA_meta_regression.do          # STATA: meta-regression
+│   └── STATA_subgroup_analysis.do        # STATA: subgroup analysis
 ├── data/
-│   └── KP.xlsx                       # Example dataset (replace with your own)
+│   └── example_data.xlsx                 # Example dataset (replace with your own)
 ├── README.md
-├── LICENSE
+└── LICENSE
 ```
 
 ## Requirements
