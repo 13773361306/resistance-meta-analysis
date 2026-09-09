@@ -42,13 +42,8 @@ A comprehensive R pipeline for single‑proportion meta‑analysis of antimicrob
 │   └── utils.R                           # Common helper functions
 ├── data/
 │   └── KP.xlsx                       # Example dataset (replace with your own)
-├── outputs/                              # All results and figures
-│   ├── forest_plots/
-│   ├── funnel_plots/
-│   └── excel_summaries/
 ├── README.md
 ├── LICENSE
-└── .gitignore
 ```
 
 ## Requirements
