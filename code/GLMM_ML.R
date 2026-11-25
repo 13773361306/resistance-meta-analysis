@@ -5,14 +5,24 @@
 # Tested logically against meta 8.x interface; RUN IN R to verify.
 # ================================================================
 
-# 1. USER SETTINGS -- SAME PATH CONVENTION AS PFT-REML SCRIPT
-# Default: E.coli.xlsx in the current working directory.
-# Optional override: Rscript GLMM_ML_meta_analysis_FINAL.R "path/to/data.xlsx"
+
+# 1. USER SETTINGS -- RELATIVE PATHS
+# Run this script from the repository root directory.
+# Example: Rscript code/GLMM_ML.R data/E.coli.xlsx
+
 args <- commandArgs(trailingOnly = TRUE)
-file_path <- if (length(args)) args[1] else "E.coli.xlsx"
+
+file_path <- if (length(args)) args[1] else "data/E.coli.xlsx"
+
 min_total <- 10L
-output_dir <- file.path(dirname(normalizePath(file_path, mustWork = TRUE)),
-                        "GLMM_ML_results")
+
+if (!file.exists(file_path)) {
+  stop("Input file not found: ", file_path)
+}
+
+species <- tools::file_path_sans_ext(basename(file_path))
+
+output_dir <- file.path("results", "GLMM_ML", species)
 
 # 2. REQUIRED PACKAGES
 needed <- c("meta", "metafor", "readxl", "openxlsx")

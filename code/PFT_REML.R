@@ -14,16 +14,30 @@ if (length(missing_packages)) {
        paste(sprintf('"%s"', missing_packages), collapse = ", "), "))")
 }
 
+
 # --------------------- USER SETTINGS ----------------------------
-# Default: file in working directory. Override by passing a path:
-# Rscript PFT_REML_meta_analysis_FINAL.R "D:/Desktop/meta/E.coli.xlsx"
+# Run this script from the repository root directory.
+# Example: Rscript code/PFT_REML.R data/E.coli.xlsx
+
 args <- commandArgs(trailingOnly = TRUE)
-file_path <- if (length(args)) args[1] else "E.coli.xlsx"
+
+file_path <- if (length(args)) args[1] else "data/E.coli.xlsx"
+
 min_total <- 10L
-out_dir <- file.path(dirname(normalizePath(file_path, mustWork = TRUE)),
-                     "PFT_REML_results")
+
+if (!file.exists(file_path)) {
+  stop("Input file not found: ", file_path)
+}
+
+species <- tools::file_path_sans_ext(basename(file_path))
+
+out_dir <- file.path("results", "PFT_REML", species)
+
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-if (!dir.exists(out_dir)) stop("Could not create output folder: ", out_dir)
+
+if (!dir.exists(out_dir)) {
+  stop("Could not create output folder: ", out_dir)
+}
 
 # ---------------------- HELPERS ---------------------------------
 num_parse <- function(x) {

@@ -7,9 +7,17 @@
 # Model: metafor::rma.uni(..., method='REML', test='z')
 # ==============================================================
 
-# ---------- 0. Settings: edit these if needed -----------------
-file_path <- "D:/Desktop/meta_regression.xlsx"
-output_dir <- "D:/Desktop/Meta_Regression_STATA_FINAL_results"
+# ---------- 0. Settings: relative paths -----------------------
+# Run from the repository root directory.
+# Example: Rscript code/Meta_Regression.R data/meta_regression.xlsx
+
+args <- commandArgs(trailingOnly = TRUE)
+
+file_path <- if (length(args)) args[1] else "data/meta_regression.xlsx"
+
+dataset_name <- tools::file_path_sans_ext(basename(file_path))
+
+output_dir <- file.path("results", "Meta_Regression", dataset_name)
 min_total <- 1L          # Stata PDF did NOT filter Total >= 10
 min_studies <- 3L        # technical minimum; set 10L for conservative policy
 plot_bubbles <- TRUE

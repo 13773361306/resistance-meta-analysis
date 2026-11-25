@@ -3,9 +3,17 @@ library(readxl)
 library(openxlsx)
 library(dplyr)
 
-# 1. File paths and settings
-file_path <- "D:/Desktop/E.coli.xlsx"
-output_dir <- "D:/Desktop/meta/CP_Final"
+# 1. File paths and settings -- relative paths
+# Run from the repository root directory.
+# Example: Rscript code/Subgroup_analysis.R data/E.coli.xlsx
+
+args <- commandArgs(trailingOnly = TRUE)
+
+file_path <- if (length(args)) args[1] else "data/E.coli.xlsx"
+
+species <- tools::file_path_sans_ext(basename(file_path))
+
+output_dir <- file.path("results", "Subgroup_analysis", species)
 pdf_font <- "Times New Roman"
 minimum_total <- 10
 subgroup_vars <- c(
